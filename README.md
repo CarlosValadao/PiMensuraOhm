@@ -1,7 +1,5 @@
-# PicoMensuraOhm
+# PicoMensuraOhm ![Demonstração do PicoMensuraOhm](https://youtu.be/kOCLvDyadcU)
   
-![PicoMensuraOhm Logo](https://via.placeholder.com/150)
-
 ## Sistema de medição de resistores com Raspberry Pi Pico W
   
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -14,7 +12,6 @@ O **PicoMensuraOhm** é um sistema avançado para medição de resistência elé
 
 Este projeto foi criado com o objetivo de facilitar a identificação e medição de resistores em ambiente educacional e de laboratório, proporcionando uma solução visual e interativa que vai além dos multímetros tradicionais.
 
-![Demonstração do PicoMensuraOhm](https://via.placeholder.com/600x300)
 
 ## 🌟 Funcionalidades
 
