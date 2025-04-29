@@ -15,7 +15,7 @@ add_executable(${PROJECT_NAME}
         lib/ssd1306.c # Biblioteca para o display OLED
         lib/oledgfx.c
         lib/push_button.c
-        lib/rgb.c
+        lib/ws2812b.c
         )
 
 target_compile_definitions(${PROJECT_NAME} PRIVATE 
@@ -28,6 +28,8 @@ target_link_libraries(${PROJECT_NAME}
         hardware_i2c
         hardware_adc
         hardware_pwm
+        hardware_pio
+        hardware_clocks
         )
 
 pico_enable_stdio_usb(${PROJECT_NAME} 1)

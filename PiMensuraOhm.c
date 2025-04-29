@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "pico/stdlib.h"
 #include "pico/bootrom.h"
@@ -22,7 +23,7 @@
 // #include "lib/font.h"
 #include "lib/push_button.h"
 #include "lib/oledgfx.h"
-#include "lib/rgb.h"
+#include "lib/ws2812b.h"
 
 #define I2C_PORT i2c1
 #define I2C_SDA 14
@@ -49,8 +50,27 @@
 #define BUTTON_A_PRESSED (gpio == BUTTON_A)
 #define BUTTON_B_PRESSED (gpio == BUTTON_B)
 
+#define CALC_OMEGA_OFFSET(x) (size_t) (8 * strlen(x))
+
+#define NUM_RESISTORS 48
+
+#define CHAR_TO_NUM(value) ((uint8_t) (value-48))
+
 static volatile uint8_t control_submenus = UNDEFINED_MENU;
 static volatile bool    showing_color_menu = false;
+
+static const uint32_t e24_resistance_values[] = {
+    560, 620, 680, 750, 820, 910, 1000, 1100,
+    1200, 1300, 1500, 1600, 1800, 2000,
+    2200, 2400, 2700, 3000, 3300, 3600,
+    3900, 4300, 4700, 5100, 5600, 6200,
+    6800, 7500, 8200, 9100, 20000, 22000,
+    24000, 27000, 30000, 33000, 36000, 39000,
+    43000, 47000, 51000, 56000, 62000, 68000,
+    75000, 82000, 91000, 100000
+};
+
+static const char *ring_colors[] = { "Bk", "Bn", "R", "Og", "Y", "G", "B", "Vt", "Gy", "Wt", "Gd", "S" };
 
 static ssd1306_t *ssd_global = NULL;
 
@@ -58,13 +78,16 @@ uint16_t R_conhecido = 10000;   // Resistor de 10k ohm
 uint32_t R_x = 0;          // Resistor desconhecido
 uint32_t resistance_sum = 0;
 uint32_t resistence_avg = 0;
-float ADC_VREF = 3.31;     // Tensão de referência do ADC
+// float ADC_VREF = 3.31;     // Tensão de referência do ADC
 uint16_t ADC_RESOLUTION = 4095; // Resolução do ADC (12 bits)
 
 // Trecho para modo BOOTSEL com botão B
 void gpio_irq_handler(uint gpio, uint32_t events);
 void draw_menu_colors(ssd1306_t *ssd);
 void draw_menu_colors_scaffold(ssd1306_t *ssd);
+
+uint32_t find_comercial_value(uint32_t value);
+uint8_t find_resistance_power_multiplyer(const char* sresistance);
 
 int main()
 {
@@ -90,8 +113,8 @@ int main()
   pb_enable_irq(BUTTON_B);
   pb_enable_irq(PB_JOYSTICK);
 
+  size_t omega_offset;
   ssd1306_t ssd;
-  rgb_t rgb;
   // I2C Initialisation. Using it at 400Khz.
   i2c_init(I2C_PORT, 400000);
 
@@ -113,8 +136,6 @@ int main()
   adc_init();
   adc_gpio_init(ADC_PIN); // GPIO 28 como entrada analógica
 
-  rgb_init_all(&rgb, RED_PIN, GREEN_PIN, BLUE_PIN, 1.0, 2048);
-
   char str_x[5]; // Buffer para armazenar a string
   char str_y[5]; // Buffer para armazenar a string
 
@@ -133,8 +154,8 @@ int main()
       // Fórmula simplificada: R_x = R_conhecido * ADC_encontrado /(ADC_RESOLUTION - adc_encontrado)
     R_x = (R_conhecido * resistence_avg) / (ADC_RESOLUTION - resistence_avg);
 
-    sprintf(str_x, "%u", resistence_avg); // Converte o inteiro em string
-    sprintf(str_y, "%u", R_x);   // Converte o float em string
+    sprintf(str_x, "%u", R_x); // Converte o inteiro em string
+    sprintf(str_y, "%u", find_comercial_value(R_x));   // Converte o float em string
 
     //  Atualiza o conteúdo do display com animações
     if(!showing_color_menu)
@@ -147,21 +168,25 @@ int main()
     //   ssd1306_line(&ssd, 3, 37, 123, 37, cor);           // Desenha uma linha
       ssd1306_draw_string(&ssd, "PiMensuraOhm", 16, 2); // Desenha uma string
       oledgfx_draw_resistor(&ssd, 24, 18);
-      ssd1306_draw_string(&ssd, "Bk", 28, 27);
-      ssd1306_draw_string(&ssd, "Bk", 48, 27);
-      ssd1306_draw_string(&ssd, "Bk", 68, 27);
+      ssd1306_draw_string(&ssd, ring_colors[CHAR_TO_NUM(str_y[0])], 28, 27);
+      ssd1306_draw_string(&ssd, ring_colors[CHAR_TO_NUM(str_y[1])], 48, 27);
+      ssd1306_draw_string(&ssd, ring_colors[find_resistance_power_multiplyer(str_y)], 68, 27);
       ssd1306_draw_string(&ssd, "Gd", 87, 27);
     //   ssd1306_draw_string(&ssd, "EMBARCATECH", 20, 16);  // Desenha uma string
     //   ssd1306_draw_string(&ssd, "  Ohmimetro", 10, 28);  // Desenha uma string
-      ssd1306_draw_string(&ssd, "ADC", 13, 41);          // Desenha uma string
-      ssd1306_draw_string(&ssd, "Resisten.", 50, 41);    // Desenha uma string
-      ssd1306_line(&ssd, 44, 37, 44, 60, cor);           // Desenha uma linha vertical
-      ssd1306_draw_string(&ssd, str_x, 8, 52);           // Desenha uma string
-      ssd1306_draw_string(&ssd, str_y, 59, 52);          // Desenha uma string
+      ssd1306_draw_string(&ssd, "Meas.", 8, 41);          // Desenha uma string
+      ssd1306_draw_string(&ssd, str_x, 16, 52);           // Desenha uma string
+      omega_offset = CALC_OMEGA_OFFSET(str_x);
+      oledgfx_draw_ohm_symbol(&ssd, 16 + omega_offset, 52);
+      ssd1306_line(&ssd, 60, 37, 60, 60, cor);           // Desenha uma linha vertical
+      ssd1306_draw_string(&ssd, "Com.", 80, 41);    // Desenha uma string
+      ssd1306_draw_string(&ssd, str_y, 70, 52);
+      omega_offset = CALC_OMEGA_OFFSET(str_y);
+      oledgfx_draw_ohm_symbol(&ssd, 70 + omega_offset, 52);    
       ssd1306_send_data(&ssd);
     //   oledgfx_draw_resistor(ssd_global, 16, 32);
     //   oledgfx_render(ssd_global);
-      sleep_ms(700);
+      sleep_ms(100);
     }
     else draw_menu_colors(ssd_global);
   }
@@ -213,7 +238,7 @@ void draw_menu_colors_scaffold(ssd1306_t *ssd)
 void draw_menu_colors(ssd1306_t *ssd)
 {
   oledgfx_clear_screen(ssd);
-  oledgfx_render(ssd);
+  //oledgfx_render(ssd);
   draw_menu_colors_scaffold(ssd);
   if(control_submenus == FIRST_MENU_COLORS)
   {
@@ -236,8 +261,44 @@ void draw_menu_colors(ssd1306_t *ssd)
     oledgfx_draw_string(ssd, "(9)  Gy - Gray", 1, 16);
     oledgfx_draw_string(ssd, "(10) Wt - White", 1, 24);
     oledgfx_draw_string(ssd, "(11) Gd - Gold", 1, 32);
-    oledgfx_draw_string(ssd, "(12) Vt - Silve", 1, 40);
+    oledgfx_draw_string(ssd, "(12) S - Silver", 1, 40);
     oledgfx_draw_string(ssd, " < A B (exit) >", 2, 52);
   }
   oledgfx_render(ssd);
+}
+
+uint32_t find_comercial_value(uint32_t resistance_value)
+{
+    uint32_t minDifference = UINT16_MAX; // Inicializa com o valor máximo possível para garantir que qualquer diferença será menor
+    uint32_t difference;
+    uint32_t curr_resistance, commercial_resistance_value = 0; // Inicializando com 0 ou algum valor válido
+    uint8_t i;
+
+    for(i = 0; i < NUM_RESISTORS; i++)
+    {
+        curr_resistance = e24_resistance_values[i];
+        
+        // Calculando a diferença entre o valor fornecido e o valor do array
+        if(curr_resistance > resistance_value)
+            difference = curr_resistance - resistance_value;
+        else
+            difference = resistance_value - curr_resistance;
+
+        // Atualizando a resistência comercial caso a diferença seja menor que a mínima
+        if(difference < minDifference)
+        {
+            commercial_resistance_value = curr_resistance;
+            minDifference = difference;
+        }
+    }
+    return commercial_resistance_value;
+}
+
+uint8_t find_resistance_power_multiplyer(const char* sresistance)
+{
+  size_t size_sresistance = strlen(sresistance);
+  if(size_sresistance == 3) return 1;
+  else if(size_sresistance == 4) return 2;
+  else if(size_sresistance == 5) return 3;
+  else if(size_sresistance == 6) return 4;
 }
