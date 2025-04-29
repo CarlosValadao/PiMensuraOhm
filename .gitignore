@@ -1,0 +1,4 @@
+build
+.vscode
+generated
+pico_sdk_import.cmake

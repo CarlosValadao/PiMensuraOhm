@@ -1,0 +1,15 @@
+.pio_version 0 // only requires PIO version 0
+
+.program ws2812
+.wrap_target
+    out x, 1
+    jmp !x do_zero
+do_one:
+    set pins, 1 [4]
+    jmp cont
+do_zero:
+    set pins, 1 [2]
+    set pins, 0 [2]
+cont:
+    set pins, 0 [1]
+.wrap
